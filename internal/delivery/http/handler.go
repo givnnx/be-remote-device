@@ -66,6 +66,43 @@ func (h *DeviceHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, "Device registered successfully", dev)
 }
 
+func (h *DeviceHandler) EnrollDevice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
+	if userID == "" {
+		response.Error(w, http.StatusUnauthorized, "Unauthorized: user identity required for enrollment")
+		return
+	}
+
+	var req models.EnrollDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	dev, isNew, err := h.svc.EnrollDevice(userID, req)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	msg := "Device re-enrolled successfully"
+	statusCode := http.StatusOK
+	if isNew {
+		statusCode = http.StatusCreated
+		msg = "New device enrolled successfully"
+	}
+
+	response.JSON(w, statusCode, msg, map[string]interface{}{
+		"device_id":  dev.ID,
+		"api_key":    dev.APIKey,
+		"machine_id": dev.MachineID,
+		"name":       dev.Name,
+		"type":       dev.Type,
+		"status":     dev.Status,
+		"is_new":     isNew,
+	})
+}
+
 func (h *DeviceHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")

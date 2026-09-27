@@ -15,6 +15,7 @@ type DeviceService interface {
 	GetDeviceByID(userID, id string) (*models.Device, error)
 	GetDeviceByAPIKey(apiKey string) (*models.Device, error)
 	CreateDevice(userID string, req models.CreateDeviceRequest) (*models.Device, error)
+	EnrollDevice(userID string, req models.EnrollDeviceRequest) (*models.Device, bool, error)
 	UpdateDevice(userID, id string, req models.UpdateDeviceRequest) (*models.Device, error)
 	DeleteDevice(userID, id string) error
 	RecordHeartbeat(deviceID string) error
@@ -81,6 +82,68 @@ func (s *deviceService) CreateDevice(userID string, req models.CreateDeviceReque
 	}
 
 	return s.repo.Create(dev)
+}
+
+func (s *deviceService) EnrollDevice(userID string, req models.EnrollDeviceRequest) (*models.Device, bool, error) {
+	if req.MachineID == "" {
+		return nil, false, errors.New("machine_id is required for enrollment")
+	}
+
+	// 1. Check if device with this MachineID already exists for this user
+	existing, err := s.repo.GetByMachineID(userID, req.MachineID)
+	if err == nil && existing != nil {
+		now := time.Now().UTC()
+		existing.LastSeen = now
+		existing.Status = models.StatusOnline
+		if req.Name != "" {
+			existing.Name = req.Name
+		}
+		if req.IPAddress != "" {
+			existing.IPAddress = req.IPAddress
+		}
+		if req.MACAddress != "" {
+			existing.MACAddress = req.MACAddress
+		}
+		existing.UpdatedAt = now
+		return existing, false, nil // false = already enrolled
+	}
+
+	// 2. New enrollment
+	now := time.Now().UTC()
+	devName := req.Name
+	if devName == "" {
+		devName = "Device-" + req.MachineID
+		if len(devName) > 16 {
+			devName = devName[:16]
+		}
+	}
+	devType := req.Type
+	if devType == "" {
+		devType = "laptop"
+	}
+
+	dev := &models.Device{
+		ID:         generateID("dev"),
+		UserID:     userID,
+		MachineID:  req.MachineID,
+		APIKey:     generateAPIKey(),
+		Name:       devName,
+		Type:       devType,
+		IPAddress:  req.IPAddress,
+		MACAddress: req.MACAddress,
+		Status:     models.StatusOnline,
+		LastSeen:   now,
+		Metadata:   req.Metadata,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	created, err := s.repo.Create(dev)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return created, true, nil // true = newly created
 }
 
 func (s *deviceService) UpdateDevice(userID, id string, req models.UpdateDeviceRequest) (*models.Device, error) {

@@ -16,6 +16,7 @@ var (
 type DeviceRepository interface {
 	GetAll(userID string) ([]*models.Device, error)
 	GetByID(userID, id string) (*models.Device, error)
+	GetByMachineID(userID, machineID string) (*models.Device, error)
 	GetByAPIKey(apiKey string) (*models.Device, error)
 	Create(dev *models.Device) (*models.Device, error)
 	Update(userID, id string, req *models.UpdateDeviceRequest) (*models.Device, error)
@@ -69,6 +70,22 @@ func (r *memoryDeviceRepository) GetByID(userID, id string) (*models.Device, err
 		return nil, ErrDeviceNotFound
 	}
 	return dev, nil
+}
+
+func (r *memoryDeviceRepository) GetByMachineID(userID, machineID string) (*models.Device, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if machineID == "" {
+		return nil, ErrDeviceNotFound
+	}
+
+	for _, dev := range r.devices {
+		if dev.UserID == userID && dev.MachineID == machineID {
+			return dev, nil
+		}
+	}
+	return nil, ErrDeviceNotFound
 }
 
 func (r *memoryDeviceRepository) GetByAPIKey(apiKey string) (*models.Device, error) {

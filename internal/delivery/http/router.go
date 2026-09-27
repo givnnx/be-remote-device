@@ -32,6 +32,7 @@ func NewRouter(
 	// Device Management (Protected - bound to user)
 	mux.HandleFunc("GET /api/v1/devices", handler.ListDevices)
 	mux.HandleFunc("POST /api/v1/devices", handler.CreateDevice)
+	mux.HandleFunc("POST /api/v1/devices/enroll", handler.EnrollDevice)
 	mux.HandleFunc("GET /api/v1/devices/{id}", handler.GetDevice)
 	mux.HandleFunc("PUT /api/v1/devices/{id}", handler.UpdateDevice)
 	mux.HandleFunc("DELETE /api/v1/devices/{id}", handler.DeleteDevice)

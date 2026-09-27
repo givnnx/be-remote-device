@@ -178,6 +178,63 @@ func TestUserRegistrationLoginAndDeviceScoping(t *testing.T) {
 		t.Errorf("expected 1 device for user 1, got %d", len(listResp.Data))
 	}
 
+	// 7. Auto-Enrollment Test: First enrollment (creates device)
+	enrollPayload := models.EnrollDeviceRequest{
+		MachineID:  "HW-UUID-ZENBOOK-1234",
+		Name:       "Zenbook-Giovanni",
+		Type:       "laptop",
+		IPAddress:  "192.168.1.55",
+		MACAddress: "AA:BB:CC:DD:EE:FF",
+	}
+	body, _ = json.Marshal(enrollPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/devices/enroll", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tokenUser1)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on first enrollment, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var enrollResp struct {
+		Data struct {
+			DeviceID  string `json:"device_id"`
+			APIKey    string `json:"api_key"`
+			MachineID string `json:"machine_id"`
+			IsNew     bool   `json:"is_new"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &enrollResp)
+	if !enrollResp.Data.IsNew || enrollResp.Data.DeviceID == "" || enrollResp.Data.APIKey == "" {
+		t.Fatalf("expected is_new=true with valid device_id and api_key")
+	}
+
+	// 8. Auto-Enrollment Test: Re-enrollment with same MachineID (should return existing device and 200 OK)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/devices/enroll", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tokenUser1)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on re-enrollment, got %d", rr.Code)
+	}
+	var reEnrollResp struct {
+		Data struct {
+			DeviceID  string `json:"device_id"`
+			APIKey    string `json:"api_key"`
+			IsNew     bool   `json:"is_new"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &reEnrollResp)
+	if reEnrollResp.Data.IsNew {
+		t.Errorf("expected is_new=false on re-enrollment")
+	}
+	if reEnrollResp.Data.DeviceID != enrollResp.Data.DeviceID {
+		t.Errorf("expected matching device ID on re-enrollment")
+	}
+
 	// Wait briefly for asynchronous action logs
 	time.Sleep(50 * time.Millisecond)
 

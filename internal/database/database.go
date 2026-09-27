@@ -54,6 +54,7 @@ func migrate(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS devices (
 		id VARCHAR(64) PRIMARY KEY,
 		user_id VARCHAR(64) NOT NULL,
+		machine_id VARCHAR(128),
 		api_key VARCHAR(128) UNIQUE NOT NULL,
 		name VARCHAR(255) NOT NULL,
 		type VARCHAR(100) NOT NULL,
@@ -66,6 +67,7 @@ func migrate(db *sql.DB) error {
 		updated_at TIMESTAMPTZ NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
+	CREATE INDEX IF NOT EXISTS idx_devices_machine_id ON devices(machine_id);
 	CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key);
 
 	CREATE TABLE IF NOT EXISTS remote_commands (

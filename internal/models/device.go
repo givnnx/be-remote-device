@@ -14,9 +14,10 @@ const (
 type Device struct {
 	ID         string                 `json:"id"`
 	UserID     string                 `json:"user_id"`
-	APIKey     string                 `json:"api_key"` // Secret key unik untuk background agent di laptop/smartphone
+	MachineID  string                 `json:"machine_id,omitempty"` // Unique Hardware GUID / BIOS UUID
+	APIKey     string                 `json:"api_key"`              // Secret key unik untuk background agent di laptop/smartphone
 	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // e.g. "laptop", "smartphone", "tablet", "pc"
+	Type       string                 `json:"type"` // e.g. "laptop", "pc", "smartphone"
 	IPAddress  string                 `json:"ip_address"`
 	MACAddress string                 `json:"mac_address"`
 	Status     DeviceStatus           `json:"status"`
@@ -27,8 +28,18 @@ type Device struct {
 }
 
 type CreateDeviceRequest struct {
+	MachineID  string                 `json:"machine_id,omitempty"`
 	Name       string                 `json:"name"`
 	Type       string                 `json:"type"`
+	IPAddress  string                 `json:"ip_address"`
+	MACAddress string                 `json:"mac_address"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type EnrollDeviceRequest struct {
+	MachineID  string                 `json:"machine_id"` // Hardware unique ID
+	Name       string                 `json:"name"`       // Hostname
+	Type       string                 `json:"type"`       // laptop or pc
 	IPAddress  string                 `json:"ip_address"`
 	MACAddress string                 `json:"mac_address"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
