@@ -40,6 +40,9 @@ func main() {
 	actionLogSvc := service.NewActionLogService(actionLogRepo)
 	defer actionLogSvc.Stop()
 
+	// Auth Service
+	authSvc := service.NewAuthService(cfg)
+
 	// Device Service & Repositories
 	deviceRepo := repository.NewMemoryDeviceRepository()
 	deviceSvc := service.NewDeviceService(deviceRepo)
@@ -47,7 +50,8 @@ func main() {
 	// HTTP Handlers & Router
 	deviceHandler := deliveryHttp.NewDeviceHandler(deviceSvc)
 	logHandler := deliveryHttp.NewLogHandler(actionLogSvc)
-	router := deliveryHttp.NewRouter(deviceHandler, logHandler, actionLogSvc)
+	authHandler := deliveryHttp.NewAuthHandler(authSvc)
+	router := deliveryHttp.NewRouter(deviceHandler, logHandler, authHandler, actionLogSvc, authSvc)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,

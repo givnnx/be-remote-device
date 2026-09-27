@@ -8,41 +8,51 @@ import (
 	"be-remote-device/internal/service"
 )
 
-func NewRouter(handler *DeviceHandler, logHandler *LogHandler, logSvc service.ActionLogService) http.Handler {
+func NewRouter(
+	handler *DeviceHandler,
+	logHandler *LogHandler,
+	authHandler *AuthHandler,
+	logSvc service.ActionLogService,
+	authSvc service.AuthService,
+) http.Handler {
 	mux := http.NewServeMux()
 
-	// Base / Health
+	// Base / Health (Public)
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 	mux.HandleFunc("GET /api/v1/health", handler.HealthCheck)
 
-	// Device Management
+	// Auth (Public)
+	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+
+	// Device Management (Protected)
 	mux.HandleFunc("GET /api/v1/devices", handler.ListDevices)
 	mux.HandleFunc("POST /api/v1/devices", handler.CreateDevice)
 	mux.HandleFunc("GET /api/v1/devices/{id}", handler.GetDevice)
 	mux.HandleFunc("PUT /api/v1/devices/{id}", handler.UpdateDevice)
 	mux.HandleFunc("DELETE /api/v1/devices/{id}", handler.DeleteDevice)
 
-	// Heartbeat
+	// Heartbeat (Protected)
 	mux.HandleFunc("POST /api/v1/devices/{id}/heartbeat", handler.Heartbeat)
 
-	// Remote Commands
+	// Remote Commands (Protected)
 	mux.HandleFunc("POST /api/v1/devices/{id}/commands", handler.SendCommand)
 	mux.HandleFunc("GET /api/v1/devices/{id}/commands", handler.ListCommands)
 	mux.HandleFunc("POST /api/v1/commands/{id}/result", handler.UpdateCommandResult)
 
-	// Telemetry & Metrics
+	// Telemetry & Metrics (Protected)
 	mux.HandleFunc("POST /api/v1/devices/{id}/telemetry", handler.RecordTelemetry)
 	mux.HandleFunc("GET /api/v1/devices/{id}/telemetry", handler.GetTelemetry)
 
-	// Action / Audit Logs
+	// Action / Audit Logs (Protected)
 	mux.HandleFunc("GET /api/v1/logs", logHandler.ListLogs)
 	mux.HandleFunc("GET /api/v1/logs/{id}", logHandler.GetLog)
 
-	return applyMiddlewares(mux, logSvc)
+	return applyMiddlewares(mux, logSvc, authSvc)
 }
 
-func applyMiddlewares(next http.Handler, logSvc service.ActionLogService) http.Handler {
-	return recoveryMiddleware(corsMiddleware(loggingMiddleware(AuditMiddleware(logSvc)(next))))
+func applyMiddlewares(next http.Handler, logSvc service.ActionLogService, authSvc service.AuthService) http.Handler {
+	// Recovery -> CORS -> Audit (records everything including 401s) -> Console Log -> Auth
+	return recoveryMiddleware(corsMiddleware(AuditMiddleware(logSvc)(loggingMiddleware(AuthMiddleware(authSvc)(next)))))
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

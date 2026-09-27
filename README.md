@@ -135,11 +135,55 @@ Aplikasi mendeteksi pelaku secara bertingkat:
 
 ---
 
+## Fitur Keamanan & Autentikasi
+
+Backend ini dilengkapi dengan **Dual Authentication Strategy** yang sangat cocok untuk mengendalikan perangkat pribadi (laptop & smartphone):
+
+1. **Master API Key (`MASTER_API_KEY`)**:
+   - Sangat ideal untuk background service/daemon di **laptop** atau aplikasi background di **smartphone** agar tidak perlu pusing memikirkan token expiry / refresh token.
+   - Cara pakai: sertakan header `X-API-Key: <MASTER_API_KEY>` atau `Authorization: Bearer <MASTER_API_KEY>` atau query parameter `?api_key=<MASTER_API_KEY>`.
+
+2. **JWT Authentication (Admin Login)**:
+   - Cocok untuk login melalui web dashboard atau kontrol manual.
+   - Endpoint: `POST /api/v1/auth/login` (username & password diatur di `.env`).
+   - Token berlaku selama 24 jam dan dikirim via header: `Authorization: Bearer <JWT_TOKEN>`.
+
+> 🛡️ **Audit Keamanan Otomatis**: Jika ada request mencurigakan atau tanpa autentikasi yang sah (`401 Unauthorized`), IP pelaku, path yang dicoba, dan waktu kejadian akan **otomatis tersimpan ke tabel database `action_logs`** sehingga Anda dapat memantau siapa saja yang mencoba mengakses server.
+
+---
+
 ## Dokumentasi API Endpoint
 
 Base URL: `http://localhost:8080`
 
-### 1. Action & Audit Logs
+### 1. Autentikasi
+
+#### Login Admin
+- **`POST /api/v1/auth/login`**
+- Body:
+```json
+{
+  "username": "admin",
+  "password": "adminpassword"
+}
+```
+- Response:
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsIn...",
+    "token_type": "Bearer",
+    "expires_in": 86400,
+    "username": "admin"
+  }
+}
+```
+
+---
+
+### 2. Action & Audit Logs
 
 #### Melihat Daftar Action Log (dengan filter & pagination)
 - **`GET /api/v1/logs?actor=admin&action=REGISTER_DEVICE&status=SUCCESS&limit=20&offset=0`**
@@ -184,23 +228,23 @@ Base URL: `http://localhost:8080`
 
 ---
 
-### 2. Device Management
+### 3. Device Management
 
 #### Registrasi Device Baru
 - **`POST /api/v1/devices`**
 - Headers:
   - `Content-Type: application/json`
-  - `X-Actor: operator-1` (opsional untuk identitas pelaku)
+  - `X-API-Key: <MASTER_API_KEY>` atau `Authorization: Bearer <JWT_TOKEN>`
 - Body:
 ```json
 {
-  "name": "RaspberryPi-Gateway-01",
-  "type": "gateway",
-  "ip_address": "192.168.1.100",
+  "name": "My-ThinkPad-X1",
+  "type": "laptop",
+  "ip_address": "192.168.1.15",
   "mac_address": "00:1B:44:11:3A:B7",
   "metadata": {
-    "location": "Warehouse A",
-    "firmware": "v1.0.4"
+    "os": "Windows 11 / Linux Dual Boot",
+    "owner": "Giovanni"
   }
 }
 ```
@@ -219,14 +263,14 @@ Base URL: `http://localhost:8080`
 
 ---
 
-### 3. Heartbeat & Remote Command
+### 4. Heartbeat & Remote Command
 
 #### Ping Heartbeat Device
 - **`POST /api/v1/devices/{id}/heartbeat`**
 
 #### Mengirim Perintah ke Device
 - **`POST /api/v1/devices/{id}/commands`**
-- Body: `{"payload": "restart_service"}`
+- Body: `{"payload": "lock_screen"}`
 
 #### Update Hasil Eksekusi Perintah
 - **`POST /api/v1/commands/{id}/result`**
@@ -234,12 +278,12 @@ Base URL: `http://localhost:8080`
 ```json
 {
   "status": "success",
-  "result": "Service restarted successfully in 1.2s"
+  "result": "Laptop screen locked successfully"
 }
 ```
 
 ---
 
-### 4. Telemetry Perangkat
+### 5. Telemetry Perangkat
 - **`POST /api/v1/devices/{id}/telemetry`**
 - **`GET /api/v1/devices/{id}/telemetry`**
