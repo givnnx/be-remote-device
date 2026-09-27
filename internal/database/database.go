@@ -41,6 +41,56 @@ func InitDB(cfg *config.Config) (*sql.DB, error) {
 
 func migrate(db *sql.DB) error {
 	query := `
+	CREATE TABLE IF NOT EXISTS users (
+		id VARCHAR(64) PRIMARY KEY,
+		username VARCHAR(100) UNIQUE NOT NULL,
+		email VARCHAR(255) UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		full_name VARCHAR(255),
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS devices (
+		id VARCHAR(64) PRIMARY KEY,
+		user_id VARCHAR(64) NOT NULL,
+		api_key VARCHAR(128) UNIQUE NOT NULL,
+		name VARCHAR(255) NOT NULL,
+		type VARCHAR(100) NOT NULL,
+		ip_address VARCHAR(50),
+		mac_address VARCHAR(50),
+		status VARCHAR(50) NOT NULL,
+		last_seen TIMESTAMPTZ NOT NULL,
+		metadata JSONB,
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
+	CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key);
+
+	CREATE TABLE IF NOT EXISTS remote_commands (
+		id VARCHAR(64) PRIMARY KEY,
+		device_id VARCHAR(64) NOT NULL,
+		payload TEXT NOT NULL,
+		status VARCHAR(50) NOT NULL,
+		result TEXT,
+		created_at TIMESTAMPTZ NOT NULL,
+		executed_at TIMESTAMPTZ
+	);
+	CREATE INDEX IF NOT EXISTS idx_commands_device_id ON remote_commands(device_id);
+
+	CREATE TABLE IF NOT EXISTS telemetries (
+		id BIGSERIAL PRIMARY KEY,
+		device_id VARCHAR(64) NOT NULL,
+		cpu_usage_pct DOUBLE PRECISION NOT NULL,
+		memory_usage_pct DOUBLE PRECISION NOT NULL,
+		disk_usage_pct DOUBLE PRECISION NOT NULL,
+		battery_level DOUBLE PRECISION,
+		temperature_celsius DOUBLE PRECISION,
+		timestamp TIMESTAMPTZ NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_telemetries_device_id ON telemetries(device_id);
+
 	CREATE TABLE IF NOT EXISTS action_logs (
 		id VARCHAR(64) PRIMARY KEY,
 		timestamp TIMESTAMPTZ NOT NULL,
@@ -57,7 +107,6 @@ func migrate(db *sql.DB) error {
 		error_message TEXT,
 		status VARCHAR(20) NOT NULL
 	);
-
 	CREATE INDEX IF NOT EXISTS idx_action_logs_timestamp ON action_logs(timestamp DESC);
 	CREATE INDEX IF NOT EXISTS idx_action_logs_actor ON action_logs(actor);
 	CREATE INDEX IF NOT EXISTS idx_action_logs_action ON action_logs(action);

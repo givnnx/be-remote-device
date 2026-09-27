@@ -14,11 +14,12 @@ var (
 )
 
 type DeviceRepository interface {
-	GetAll() ([]*models.Device, error)
-	GetByID(id string) (*models.Device, error)
+	GetAll(userID string) ([]*models.Device, error)
+	GetByID(userID, id string) (*models.Device, error)
+	GetByAPIKey(apiKey string) (*models.Device, error)
 	Create(dev *models.Device) (*models.Device, error)
-	Update(id string, req *models.UpdateDeviceRequest) (*models.Device, error)
-	Delete(id string) error
+	Update(userID, id string, req *models.UpdateDeviceRequest) (*models.Device, error)
+	Delete(userID, id string) error
 	UpdateStatus(id string, status models.DeviceStatus) error
 	UpdateLastSeen(id string) error
 
@@ -46,26 +47,44 @@ func NewMemoryDeviceRepository() DeviceRepository {
 	}
 }
 
-func (r *memoryDeviceRepository) GetAll() ([]*models.Device, error) {
+func (r *memoryDeviceRepository) GetAll(userID string) ([]*models.Device, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	list := make([]*models.Device, 0, len(r.devices))
+	list := make([]*models.Device, 0)
 	for _, dev := range r.devices {
-		list = append(list, dev)
+		if dev.UserID == userID {
+			list = append(list, dev)
+		}
 	}
 	return list, nil
 }
 
-func (r *memoryDeviceRepository) GetByID(id string) (*models.Device, error) {
+func (r *memoryDeviceRepository) GetByID(userID, id string) (*models.Device, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	dev, exists := r.devices[id]
-	if !exists {
+	if !exists || (userID != "" && dev.UserID != userID) {
 		return nil, ErrDeviceNotFound
 	}
 	return dev, nil
+}
+
+func (r *memoryDeviceRepository) GetByAPIKey(apiKey string) (*models.Device, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if apiKey == "" {
+		return nil, ErrDeviceNotFound
+	}
+
+	for _, dev := range r.devices {
+		if dev.APIKey == apiKey {
+			return dev, nil
+		}
+	}
+	return nil, ErrDeviceNotFound
 }
 
 func (r *memoryDeviceRepository) Create(dev *models.Device) (*models.Device, error) {
@@ -76,12 +95,12 @@ func (r *memoryDeviceRepository) Create(dev *models.Device) (*models.Device, err
 	return dev, nil
 }
 
-func (r *memoryDeviceRepository) Update(id string, req *models.UpdateDeviceRequest) (*models.Device, error) {
+func (r *memoryDeviceRepository) Update(userID, id string, req *models.UpdateDeviceRequest) (*models.Device, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	dev, exists := r.devices[id]
-	if !exists {
+	if !exists || (userID != "" && dev.UserID != userID) {
 		return nil, ErrDeviceNotFound
 	}
 
@@ -108,11 +127,12 @@ func (r *memoryDeviceRepository) Update(id string, req *models.UpdateDeviceReque
 	return dev, nil
 }
 
-func (r *memoryDeviceRepository) Delete(id string) error {
+func (r *memoryDeviceRepository) Delete(userID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.devices[id]; !exists {
+	dev, exists := r.devices[id]
+	if !exists || (userID != "" && dev.UserID != userID) {
 		return ErrDeviceNotFound
 	}
 	delete(r.devices, id)

@@ -5,15 +5,18 @@ import (
 	"net/http"
 	"time"
 
+	"be-remote-device/internal/config"
 	"be-remote-device/internal/service"
 )
 
 func NewRouter(
+	cfg *config.Config,
 	handler *DeviceHandler,
 	logHandler *LogHandler,
 	authHandler *AuthHandler,
 	logSvc service.ActionLogService,
 	authSvc service.AuthService,
+	deviceSvc service.DeviceService,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -22,16 +25,18 @@ func NewRouter(
 	mux.HandleFunc("GET /api/v1/health", handler.HealthCheck)
 
 	// Auth (Public)
+	mux.HandleFunc("POST /api/v1/auth/register", authHandler.Register)
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	mux.HandleFunc("GET /api/v1/auth/me", authHandler.Me)
 
-	// Device Management (Protected)
+	// Device Management (Protected - bound to user)
 	mux.HandleFunc("GET /api/v1/devices", handler.ListDevices)
 	mux.HandleFunc("POST /api/v1/devices", handler.CreateDevice)
 	mux.HandleFunc("GET /api/v1/devices/{id}", handler.GetDevice)
 	mux.HandleFunc("PUT /api/v1/devices/{id}", handler.UpdateDevice)
 	mux.HandleFunc("DELETE /api/v1/devices/{id}", handler.DeleteDevice)
 
-	// Heartbeat (Protected)
+	// Heartbeat (Protected - laptop/phone daemon ping)
 	mux.HandleFunc("POST /api/v1/devices/{id}/heartbeat", handler.Heartbeat)
 
 	// Remote Commands (Protected)
@@ -47,12 +52,18 @@ func NewRouter(
 	mux.HandleFunc("GET /api/v1/logs", logHandler.ListLogs)
 	mux.HandleFunc("GET /api/v1/logs/{id}", logHandler.GetLog)
 
-	return applyMiddlewares(mux, logSvc, authSvc)
+	return applyMiddlewares(mux, cfg, logSvc, authSvc, deviceSvc)
 }
 
-func applyMiddlewares(next http.Handler, logSvc service.ActionLogService, authSvc service.AuthService) http.Handler {
+func applyMiddlewares(
+	next http.Handler,
+	cfg *config.Config,
+	logSvc service.ActionLogService,
+	authSvc service.AuthService,
+	deviceSvc service.DeviceService,
+) http.Handler {
 	// Recovery -> CORS -> Audit (records everything including 401s) -> Console Log -> Auth
-	return recoveryMiddleware(corsMiddleware(AuditMiddleware(logSvc)(loggingMiddleware(AuthMiddleware(authSvc)(next)))))
+	return recoveryMiddleware(corsMiddleware(AuditMiddleware(logSvc)(loggingMiddleware(AuthMiddleware(cfg, authSvc, deviceSvc)(next)))))
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -72,7 +83,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Device-Key, X-API-Key, X-Actor, X-User-ID")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

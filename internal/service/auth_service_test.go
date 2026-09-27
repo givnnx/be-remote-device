@@ -5,48 +5,82 @@ import (
 
 	"be-remote-device/internal/config"
 	"be-remote-device/internal/models"
+	"be-remote-device/internal/repository"
 )
 
-func TestAuthService(t *testing.T) {
+func TestAuthService_RegisterAndLogin(t *testing.T) {
 	cfg := &config.Config{
-		AppName:       "be-remote-device",
-		JWTSecret:     "secret-jwt-key",
-		MasterAPIKey:  "my-secret-api-key",
-		AdminUsername: "admin",
-		AdminPassword: "mypassword123",
+		AppName:      "be-remote-device",
+		JWTSecret:    "secret-jwt-key",
+		MasterAPIKey: "my-secret-api-key",
 	}
 
-	authSvc := NewAuthService(cfg)
+	userRepo := repository.NewMemoryUserRepository()
+	authSvc := NewAuthService(cfg, userRepo)
 
-	// 1. Invalid login
-	_, err := authSvc.Login(models.LoginRequest{Username: "admin", Password: "wrong"})
+	// 1. Register new user
+	regResp, err := authSvc.Register(models.RegisterRequest{
+		Username: "giovanni",
+		Email:    "giovanni@example.com",
+		Password: "strongpassword123",
+		FullName: "Giovanni Agung",
+	})
+	if err != nil {
+		t.Fatalf("expected registration to succeed, got: %v", err)
+	}
+	if regResp.ID == "" {
+		t.Errorf("expected generated user ID")
+	}
+
+	// Duplicate registration should fail
+	_, err = authSvc.Register(models.RegisterRequest{
+		Username: "giovanni",
+		Email:    "different@example.com",
+		Password: "strongpassword123",
+	})
+	if err != repository.ErrUserAlreadyExists {
+		t.Errorf("expected ErrUserAlreadyExists on duplicate username, got: %v", err)
+	}
+
+	// 2. Login with correct credentials (username)
+	loginResp, err := authSvc.Login(models.LoginRequest{
+		Username: "giovanni",
+		Password: "strongpassword123",
+	})
+	if err != nil {
+		t.Fatalf("expected login to succeed, got: %v", err)
+	}
+	if loginResp.Token == "" {
+		t.Errorf("expected non-empty token")
+	}
+
+	// 3. Login with email
+	loginWithEmailResp, err := authSvc.Login(models.LoginRequest{
+		Username: "giovanni@example.com",
+		Password: "strongpassword123",
+	})
+	if err != nil {
+		t.Fatalf("expected login with email to succeed, got: %v", err)
+	}
+	if loginWithEmailResp.Token == "" {
+		t.Errorf("expected non-empty token")
+	}
+
+	// 4. Login with invalid password
+	_, err = authSvc.Login(models.LoginRequest{
+		Username: "giovanni",
+		Password: "wrongpassword",
+	})
 	if err != ErrInvalidCredentials {
-		t.Errorf("expected ErrInvalidCredentials, got %v", err)
+		t.Errorf("expected ErrInvalidCredentials, got: %v", err)
 	}
 
-	// 2. Successful login
-	resp, err := authSvc.Login(models.LoginRequest{Username: "admin", Password: "mypassword123"})
+	// 5. Validate Token
+	claims, err := authSvc.ValidateToken(loginResp.Token)
 	if err != nil {
-		t.Fatalf("expected login to succeed, got %v", err)
+		t.Fatalf("expected token validation to succeed, got: %v", err)
 	}
-	if resp.Token == "" {
-		t.Errorf("expected token not to be empty")
-	}
-
-	// 3. Validate Token
-	claims, err := authSvc.ValidateToken(resp.Token)
-	if err != nil {
-		t.Fatalf("expected token to be valid, got %v", err)
-	}
-	if claims.Username != "admin" {
-		t.Errorf("expected username admin, got %s", claims.Username)
-	}
-
-	// 4. Validate API Key
-	if !authSvc.ValidateAPIKey("my-secret-api-key") {
-		t.Errorf("expected valid API key")
-	}
-	if authSvc.ValidateAPIKey("invalid-key") {
-		t.Errorf("expected invalid API key to fail")
+	if claims.UserID != regResp.ID {
+		t.Errorf("expected claims UserID %s, got %s", regResp.ID, claims.UserID)
 	}
 }

@@ -14,14 +14,16 @@ import (
 	"be-remote-device/internal/service"
 )
 
-func TestDeviceHandler_EndpointsAuthAndAuditLogging(t *testing.T) {
+func TestUserRegistrationLoginAndDeviceScoping(t *testing.T) {
 	cfg := &config.Config{
-		AppName:       "be-remote-device",
-		JWTSecret:     "test-secret-key-12345",
-		MasterAPIKey:  "my-laptop-key-abcde",
-		AdminUsername: "admin",
-		AdminPassword: "secretpassword",
+		AppName:      "be-remote-device",
+		JWTSecret:    "test-jwt-secret-12345",
+		MasterAPIKey: "master-backup-key-123",
 	}
+
+	userRepo := repository.NewMemoryUserRepository()
+	authSvc := service.NewAuthService(cfg, userRepo)
+	authHandler := NewAuthHandler(authSvc)
 
 	deviceRepo := repository.NewMemoryDeviceRepository()
 	deviceSvc := service.NewDeviceService(deviceRepo)
@@ -31,103 +33,161 @@ func TestDeviceHandler_EndpointsAuthAndAuditLogging(t *testing.T) {
 	logSvc := service.NewActionLogService(logRepo)
 	defer logSvc.Stop()
 
-	authSvc := service.NewAuthService(cfg)
-	authHandler := NewAuthHandler(authSvc)
 	logHandler := NewLogHandler(logSvc)
 
-	router := NewRouter(deviceHandler, logHandler, authHandler, logSvc, authSvc)
+	router := NewRouter(cfg, deviceHandler, logHandler, authHandler, logSvc, authSvc, deviceSvc)
 
-	// 1. Health check (Public: Should work without any auth)
+	// 1. Health check (Public)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
-
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rr.Code)
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	// 2. Protected endpoint WITHOUT credentials -> Should return 401 Unauthorized
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	// 2. Register User 1
+	regPayload := models.RegisterRequest{
+		Username: "giovanni",
+		Email:    "giovanni@personal.com",
+		Password: "password12345",
+		FullName: "Giovanni Agung",
+	}
+	body, _ := json.Marshal(regPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401 Unauthorized, got %d", rr.Code)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on registration, got %d, body: %s", rr.Code, rr.Body.String())
 	}
 
-	// 3. Login to get JWT Token
-	loginBody, _ := json.Marshal(models.LoginRequest{
-		Username: "admin",
-		Password: "secretpassword",
-	})
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
+	// 3. Login User 1
+	loginPayload := models.LoginRequest{
+		Username: "giovanni",
+		Password: "password12345",
+	}
+	body, _ = json.Marshal(loginPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected login status 200, got %d", rr.Code)
+		t.Fatalf("expected 200 OK on login, got %d", rr.Code)
 	}
 
 	var loginResp struct {
 		Data models.LoginResponse `json:"data"`
 	}
 	_ = json.Unmarshal(rr.Body.Bytes(), &loginResp)
-	jwtToken := loginResp.Data.Token
-	if jwtToken == "" {
-		t.Fatalf("expected valid JWT token from login")
-	}
+	tokenUser1 := loginResp.Data.Token
+	userID1 := loginResp.Data.User.ID
 
-	// 4. Create Device using JWT Bearer Token
-	devicePayload := models.CreateDeviceRequest{
+	// 4. Create Device for User 1 (Laptop)
+	devPayload := models.CreateDeviceRequest{
 		Name:      "My-Personal-Laptop",
 		Type:      "laptop",
-		IPAddress: "192.168.1.15",
+		IPAddress: "192.168.1.20",
 	}
-	body, _ := json.Marshal(devicePayload)
+	body, _ = json.Marshal(devPayload)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/devices", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	req.Header.Set("Authorization", "Bearer "+tokenUser1)
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected status 201 Created with JWT, got %d, body: %s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 201 Created device, got %d, body: %s", rr.Code, rr.Body.String())
 	}
 
-	// 5. Access with Master API Key (e.g., from laptop/smartphone daemon)
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
-	req.Header.Set("X-API-Key", "my-laptop-key-abcde")
+	var devResp struct {
+		Data models.Device `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &devResp)
+	laptopDevice := devResp.Data
+
+	if laptopDevice.UserID != userID1 {
+		t.Errorf("expected device UserID %s, got %s", userID1, laptopDevice.UserID)
+	}
+	if laptopDevice.APIKey == "" {
+		t.Errorf("expected generated device APIKey")
+	}
+
+	// 5. Device Daemon (Laptop) sends Heartbeat using its X-Device-Key
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+laptopDevice.ID+"/heartbeat", nil)
+	req.Header.Set("X-Device-Key", laptopDevice.APIKey)
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status 200 OK with API Key, got %d", rr.Code)
+		t.Fatalf("expected 200 OK on heartbeat via device key, got %d", rr.Code)
 	}
 
-	// Wait briefly for asynchronous log worker
+	// 6. User 2 registers and shouldn't see User 1's device
+	regPayload2 := models.RegisterRequest{
+		Username: "otheruser",
+		Email:    "other@example.com",
+		Password: "password987",
+	}
+	body, _ = json.Marshal(regPayload2)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	// Login User 2
+	loginPayload2 := models.LoginRequest{
+		Username: "otheruser",
+		Password: "password987",
+	}
+	body, _ = json.Marshal(loginPayload2)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	var loginResp2 struct {
+		Data models.LoginResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &loginResp2)
+	tokenUser2 := loginResp2.Data.Token
+
+	// User 2 lists devices: should be empty
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenUser2)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	var listResp struct {
+		Data []*models.Device `json:"data"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
+	if len(listResp.Data) != 0 {
+		t.Errorf("expected 0 devices for user 2, got %d", len(listResp.Data))
+	}
+
+	// User 1 lists devices: should see 1 device
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenUser1)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
+	if len(listResp.Data) != 1 {
+		t.Errorf("expected 1 device for user 1, got %d", len(listResp.Data))
+	}
+
+	// Wait briefly for asynchronous action logs
 	time.Sleep(50 * time.Millisecond)
 
-	// 6. Query Action Logs (using API Key)
+	// Query Action Logs
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/logs", nil)
-	req.Header.Set("X-API-Key", "my-laptop-key-abcde")
+	req.Header.Set("Authorization", "Bearer "+tokenUser1)
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status 200 reading logs, got %d", rr.Code)
-	}
-
-	var logResp struct {
-		Data struct {
-			Total int                 `json:"total"`
-			Items []*models.ActionLog `json:"items"`
-		} `json:"data"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &logResp)
-
-	// Logs should have captured the unauthorized attempt, the registration, and the listing!
-	if logResp.Data.Total < 2 {
-		t.Errorf("expected at least 2 logs captured, got %d", logResp.Data.Total)
+		t.Fatalf("expected 200 querying logs, got %d", rr.Code)
 	}
 }

@@ -25,15 +25,19 @@ func main() {
 
 	slog.Info("Starting service...", "app_name", cfg.AppName, "environment", cfg.AppEnv)
 
-	// Database Connection & Repository
+	// Database Connection & Repositories
 	var actionLogRepo repository.ActionLogRepository
+	var userRepo repository.UserRepository
+
 	db, err := database.InitDB(cfg)
 	if err != nil {
-		slog.Warn("Database initialization failed. Using in-memory ActionLog repository as fallback.", "error", err)
+		slog.Warn("Database initialization failed. Using in-memory repositories as fallback.", "error", err)
 		actionLogRepo = repository.NewMemoryActionLogRepository()
+		userRepo = repository.NewMemoryUserRepository()
 	} else {
 		defer db.Close()
 		actionLogRepo = repository.NewPostgresActionLogRepository(db)
+		userRepo = repository.NewPostgresUserRepository(db)
 	}
 
 	// Action Log Service
@@ -41,7 +45,7 @@ func main() {
 	defer actionLogSvc.Stop()
 
 	// Auth Service
-	authSvc := service.NewAuthService(cfg)
+	authSvc := service.NewAuthService(cfg, userRepo)
 
 	// Device Service & Repositories
 	deviceRepo := repository.NewMemoryDeviceRepository()
@@ -51,7 +55,7 @@ func main() {
 	deviceHandler := deliveryHttp.NewDeviceHandler(deviceSvc)
 	logHandler := deliveryHttp.NewLogHandler(actionLogSvc)
 	authHandler := deliveryHttp.NewAuthHandler(authSvc)
-	router := deliveryHttp.NewRouter(deviceHandler, logHandler, authHandler, actionLogSvc, authSvc)
+	router := deliveryHttp.NewRouter(cfg, deviceHandler, logHandler, authHandler, actionLogSvc, authSvc, deviceSvc)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,

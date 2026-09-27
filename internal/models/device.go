@@ -13,8 +13,10 @@ const (
 
 type Device struct {
 	ID         string                 `json:"id"`
+	UserID     string                 `json:"user_id"`
+	APIKey     string                 `json:"api_key"` // Secret key unik untuk background agent di laptop/smartphone
 	Name       string                 `json:"name"`
-	Type       string                 `json:"type"`       // e.g. "gateway", "sensor", "terminal", "pos"
+	Type       string                 `json:"type"` // e.g. "laptop", "smartphone", "tablet", "pc"
 	IPAddress  string                 `json:"ip_address"`
 	MACAddress string                 `json:"mac_address"`
 	Status     DeviceStatus           `json:"status"`

@@ -135,20 +135,27 @@ Aplikasi mendeteksi pelaku secara bertingkat:
 
 ---
 
-## Fitur Keamanan & Autentikasi
+## Fitur Keamanan, Multi-User & Device Binding
 
-Backend ini dilengkapi dengan **Dual Authentication Strategy** yang sangat cocok untuk mengendalikan perangkat pribadi (laptop & smartphone):
+Backend ini dilengkapi dengan arsitektur **Multi-User & Device Scoping**:
 
-1. **Master API Key (`MASTER_API_KEY`)**:
-   - Sangat ideal untuk background service/daemon di **laptop** atau aplikasi background di **smartphone** agar tidak perlu pusing memikirkan token expiry / refresh token.
-   - Cara pakai: sertakan header `X-API-Key: <MASTER_API_KEY>` atau `Authorization: Bearer <MASTER_API_KEY>` atau query parameter `?api_key=<MASTER_API_KEY>`.
+1. **User Authentication (Register & Login)**:
+   - Pengguna mendaftar secara mandiri melalui `POST /api/v1/auth/register` (password di-hash dengan standar `bcrypt`).
+   - Login via `POST /api/v1/auth/login` menghasilkan token JWT berdurasi 7 hari.
+   - Seluruh data perangkat (device, command, telemetry) **terikat secara eksklusif ke `user_id` pemilik**. Pengguna lain tidak dapat melihat atau mengendalikan perangkat yang bukan miliknya.
 
-2. **JWT Authentication (Admin Login)**:
-   - Cocok untuk login melalui web dashboard atau kontrol manual.
-   - Endpoint: `POST /api/v1/auth/login` (username & password diatur di `.env`).
-   - Token berlaku selama 24 jam dan dikirim via header: `Authorization: Bearer <JWT_TOKEN>`.
+2. **Per-Device API Key (Untuk Laptop & Smartphone)**:
+   - Saat perangkat didaftarkan, sistem otomatis menghasilkan `api_key` unik (contoh: `devkey_9b2e...`).
+   - Simpan `api_key` ini pada skrip background/daemon di **laptop** atau **smartphone** Anda.
+   - Device mengirimkan data (heartbeat, telemetry, hasil perintah) cukup dengan menyertakan header:
+     - `X-Device-Key: <devkey_...>`
+     - atau query param `?api_key=<devkey_...>`
+   - Tidak perlu pusing memikirkan token kedaluwarsa pada background service perangkat Anda.
 
-> 🛡️ **Audit Keamanan Otomatis**: Jika ada request mencurigakan atau tanpa autentikasi yang sah (`401 Unauthorized`), IP pelaku, path yang dicoba, dan waktu kejadian akan **otomatis tersimpan ke tabel database `action_logs`** sehingga Anda dapat memantau siapa saja yang mencoba mengakses server.
+3. **Master API Key (`MASTER_API_KEY`)**:
+   - Berfungsi sebagai emergency key di file `.env` jika diperlukan akses langsung.
+
+> 🛡️ **Audit Keamanan Otomatis**: Jika ada request mencurigakan atau tanpa autentikasi yang sah (`401 Unauthorized`), IP pelaku, path yang dicoba, dan waktu kejadian akan **otomatis tersimpan ke tabel database `action_logs`** sehingga Anda dapat melacak percobaan intrusi.
 
 ---
 
@@ -156,15 +163,41 @@ Backend ini dilengkapi dengan **Dual Authentication Strategy** yang sangat cocok
 
 Base URL: `http://localhost:8080`
 
-### 1. Autentikasi
+### 1. Autentikasi User
 
-#### Login Admin
-- **`POST /api/v1/auth/login`**
+#### Register Akun Baru
+- **`POST /api/v1/auth/register`**
 - Body:
 ```json
 {
-  "username": "admin",
-  "password": "adminpassword"
+  "username": "giovanni",
+  "email": "giovanni@personal.com",
+  "password": "strongpassword123",
+  "full_name": "Giovanni Agung"
+}
+```
+- Response:
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "data": {
+    "id": "usr-8a2b3c4d",
+    "username": "giovanni",
+    "email": "giovanni@personal.com",
+    "full_name": "Giovanni Agung",
+    "created_at": "2026-09-27T16:10:00Z"
+  }
+}
+```
+
+#### Login User
+- **`POST /api/v1/auth/login`**
+- Body (dapat menggunakan username atau email):
+```json
+{
+  "username": "giovanni",
+  "password": "strongpassword123"
 }
 ```
 - Response:
@@ -175,11 +208,20 @@ Base URL: `http://localhost:8080`
   "data": {
     "token": "eyJhbGciOiJIUzI1NiIsIn...",
     "token_type": "Bearer",
-    "expires_in": 86400,
-    "username": "admin"
+    "expires_in": 604800,
+    "user": {
+      "id": "usr-8a2b3c4d",
+      "username": "giovanni",
+      "email": "giovanni@personal.com",
+      "full_name": "Giovanni Agung"
+    }
   }
 }
 ```
+
+#### Profil Saya
+- **`GET /api/v1/auth/me`**
+- Header: `Authorization: Bearer <JWT_TOKEN>`
 
 ---
 

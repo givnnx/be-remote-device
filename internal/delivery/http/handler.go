@@ -24,7 +24,8 @@ func (h *DeviceHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
-	devices, err := h.svc.GetAllDevices()
+	userID := GetUserIDFromContext(r.Context())
+	devices, err := h.svc.GetAllDevices(userID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -33,8 +34,9 @@ func (h *DeviceHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) GetDevice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
-	dev, err := h.svc.GetDeviceByID(id)
+	dev, err := h.svc.GetDeviceByID(userID, id)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "Device not found")
 		return
@@ -43,22 +45,29 @@ func (h *DeviceHandler) GetDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
+	if userID == "" {
+		response.Error(w, http.StatusUnauthorized, "Unauthorized: user required to create device")
+		return
+	}
+
 	var req models.CreateDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	dev, err := h.svc.CreateDevice(req)
+	dev, err := h.svc.CreateDevice(userID, req)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	response.JSON(w, http.StatusCreated, "Device created successfully", dev)
+	response.JSON(w, http.StatusCreated, "Device registered successfully", dev)
 }
 
 func (h *DeviceHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
 	var req models.UpdateDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -66,7 +75,7 @@ func (h *DeviceHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dev, err := h.svc.UpdateDevice(id, req)
+	dev, err := h.svc.UpdateDevice(userID, id, req)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, err.Error())
 		return
@@ -76,8 +85,9 @@ func (h *DeviceHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) DeleteDevice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
-	if err := h.svc.DeleteDevice(id); err != nil {
+	if err := h.svc.DeleteDevice(userID, id); err != nil {
 		response.Error(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -96,6 +106,7 @@ func (h *DeviceHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
 	var req models.SendCommandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -103,7 +114,7 @@ func (h *DeviceHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd, err := h.svc.SendCommand(id, req)
+	cmd, err := h.svc.SendCommand(userID, id, req)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -113,8 +124,9 @@ func (h *DeviceHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DeviceHandler) ListCommands(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
-	cmds, err := h.svc.GetDeviceCommands(id)
+	cmds, err := h.svc.GetDeviceCommands(userID, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -163,8 +175,9 @@ func (h *DeviceHandler) RecordTelemetry(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *DeviceHandler) GetTelemetry(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserIDFromContext(r.Context())
 	id := r.PathValue("id")
-	data, err := h.svc.GetLatestTelemetry(id)
+	data, err := h.svc.GetLatestTelemetry(userID, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return

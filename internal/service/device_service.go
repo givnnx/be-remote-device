@@ -11,19 +11,20 @@ import (
 )
 
 type DeviceService interface {
-	GetAllDevices() ([]*models.Device, error)
-	GetDeviceByID(id string) (*models.Device, error)
-	CreateDevice(req models.CreateDeviceRequest) (*models.Device, error)
-	UpdateDevice(id string, req models.UpdateDeviceRequest) (*models.Device, error)
-	DeleteDevice(id string) error
+	GetAllDevices(userID string) ([]*models.Device, error)
+	GetDeviceByID(userID, id string) (*models.Device, error)
+	GetDeviceByAPIKey(apiKey string) (*models.Device, error)
+	CreateDevice(userID string, req models.CreateDeviceRequest) (*models.Device, error)
+	UpdateDevice(userID, id string, req models.UpdateDeviceRequest) (*models.Device, error)
+	DeleteDevice(userID, id string) error
 	RecordHeartbeat(deviceID string) error
 
-	SendCommand(deviceID string, req models.SendCommandRequest) (*models.RemoteCommand, error)
-	GetDeviceCommands(deviceID string) ([]*models.RemoteCommand, error)
+	SendCommand(userID, deviceID string, req models.SendCommandRequest) (*models.RemoteCommand, error)
+	GetDeviceCommands(userID, deviceID string) ([]*models.RemoteCommand, error)
 	UpdateCommandExecution(cmdID string, status models.CommandStatus, result string) (*models.RemoteCommand, error)
 
 	RecordTelemetry(data models.TelemetryData) error
-	GetLatestTelemetry(deviceID string) (*models.TelemetryData, error)
+	GetLatestTelemetry(userID, deviceID string) (*models.TelemetryData, error)
 }
 
 type deviceService struct {
@@ -40,15 +41,25 @@ func generateID(prefix string) string {
 	return prefix + "-" + hex.EncodeToString(b)
 }
 
-func (s *deviceService) GetAllDevices() ([]*models.Device, error) {
-	return s.repo.GetAll()
+func generateAPIKey() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return "devkey_" + hex.EncodeToString(b)
 }
 
-func (s *deviceService) GetDeviceByID(id string) (*models.Device, error) {
-	return s.repo.GetByID(id)
+func (s *deviceService) GetAllDevices(userID string) ([]*models.Device, error) {
+	return s.repo.GetAll(userID)
 }
 
-func (s *deviceService) CreateDevice(req models.CreateDeviceRequest) (*models.Device, error) {
+func (s *deviceService) GetDeviceByID(userID, id string) (*models.Device, error) {
+	return s.repo.GetByID(userID, id)
+}
+
+func (s *deviceService) GetDeviceByAPIKey(apiKey string) (*models.Device, error) {
+	return s.repo.GetByAPIKey(apiKey)
+}
+
+func (s *deviceService) CreateDevice(userID string, req models.CreateDeviceRequest) (*models.Device, error) {
 	if req.Name == "" {
 		return nil, errors.New("device name is required")
 	}
@@ -56,6 +67,8 @@ func (s *deviceService) CreateDevice(req models.CreateDeviceRequest) (*models.De
 	now := time.Now().UTC()
 	dev := &models.Device{
 		ID:         generateID("dev"),
+		UserID:     userID,
+		APIKey:     generateAPIKey(),
 		Name:       req.Name,
 		Type:       req.Type,
 		IPAddress:  req.IPAddress,
@@ -70,21 +83,21 @@ func (s *deviceService) CreateDevice(req models.CreateDeviceRequest) (*models.De
 	return s.repo.Create(dev)
 }
 
-func (s *deviceService) UpdateDevice(id string, req models.UpdateDeviceRequest) (*models.Device, error) {
-	return s.repo.Update(id, &req)
+func (s *deviceService) UpdateDevice(userID, id string, req models.UpdateDeviceRequest) (*models.Device, error) {
+	return s.repo.Update(userID, id, &req)
 }
 
-func (s *deviceService) DeleteDevice(id string) error {
-	return s.repo.Delete(id)
+func (s *deviceService) DeleteDevice(userID, id string) error {
+	return s.repo.Delete(userID, id)
 }
 
 func (s *deviceService) RecordHeartbeat(deviceID string) error {
 	return s.repo.UpdateLastSeen(deviceID)
 }
 
-func (s *deviceService) SendCommand(deviceID string, req models.SendCommandRequest) (*models.RemoteCommand, error) {
-	// Check if device exists
-	_, err := s.repo.GetByID(deviceID)
+func (s *deviceService) SendCommand(userID, deviceID string, req models.SendCommandRequest) (*models.RemoteCommand, error) {
+	// Verify device belongs to user
+	_, err := s.repo.GetByID(userID, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +117,12 @@ func (s *deviceService) SendCommand(deviceID string, req models.SendCommandReque
 	return s.repo.SaveCommand(cmd)
 }
 
-func (s *deviceService) GetDeviceCommands(deviceID string) ([]*models.RemoteCommand, error) {
+func (s *deviceService) GetDeviceCommands(userID, deviceID string) ([]*models.RemoteCommand, error) {
+	// Verify ownership
+	_, err := s.repo.GetByID(userID, deviceID)
+	if err != nil {
+		return nil, err
+	}
 	return s.repo.GetCommandsByDeviceID(deviceID)
 }
 
@@ -116,11 +134,16 @@ func (s *deviceService) RecordTelemetry(data models.TelemetryData) error {
 	if data.Timestamp.IsZero() {
 		data.Timestamp = time.Now().UTC()
 	}
-	// Also mark device as seen
+	// Mark device as seen
 	_ = s.repo.UpdateLastSeen(data.DeviceID)
 	return s.repo.SaveTelemetry(&data)
 }
 
-func (s *deviceService) GetLatestTelemetry(deviceID string) (*models.TelemetryData, error) {
+func (s *deviceService) GetLatestTelemetry(userID, deviceID string) (*models.TelemetryData, error) {
+	// Verify ownership
+	_, err := s.repo.GetByID(userID, deviceID)
+	if err != nil {
+		return nil, err
+	}
 	return s.repo.GetLatestTelemetry(deviceID)
 }

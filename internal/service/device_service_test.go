@@ -10,11 +10,12 @@ import (
 func TestDeviceService_Lifecycle(t *testing.T) {
 	repo := repository.NewMemoryDeviceRepository()
 	svc := NewDeviceService(repo)
+	userID := "usr-123"
 
 	// Create
-	created, err := svc.CreateDevice(models.CreateDeviceRequest{
-		Name:      "Test-Device-01",
-		Type:      "sensor",
+	created, err := svc.CreateDevice(userID, models.CreateDeviceRequest{
+		Name:      "Test-Laptop-01",
+		Type:      "laptop",
 		IPAddress: "192.168.1.50",
 	})
 	if err != nil {
@@ -23,19 +24,37 @@ func TestDeviceService_Lifecycle(t *testing.T) {
 	if created.ID == "" {
 		t.Errorf("expected non-empty device ID")
 	}
+	if created.UserID != userID {
+		t.Errorf("expected user ID %s, got %s", userID, created.UserID)
+	}
+	if created.APIKey == "" {
+		t.Errorf("expected generated device APIKey")
+	}
 
 	// Read
-	found, err := svc.GetDeviceByID(created.ID)
+	found, err := svc.GetDeviceByID(userID, created.ID)
 	if err != nil {
 		t.Fatalf("expected to find device, got error: %v", err)
 	}
-	if found.Name != "Test-Device-01" {
-		t.Errorf("expected name Test-Device-01, got %s", found.Name)
+	if found.Name != "Test-Laptop-01" {
+		t.Errorf("expected name Test-Laptop-01, got %s", found.Name)
+	}
+
+	// Read by APIKey
+	foundByAPIKey, err := svc.GetDeviceByAPIKey(created.APIKey)
+	if err != nil || foundByAPIKey.ID != created.ID {
+		t.Errorf("expected device lookup by APIKey to succeed")
+	}
+
+	// Isolation test: Another user cannot access this device
+	_, err = svc.GetDeviceByID("another-user", created.ID)
+	if err == nil {
+		t.Errorf("expected error when another user tries to access device")
 	}
 
 	// Update
-	newName := "Updated-Device-01"
-	updated, err := svc.UpdateDevice(created.ID, models.UpdateDeviceRequest{
+	newName := "Updated-Laptop-01"
+	updated, err := svc.UpdateDevice(userID, created.ID, models.UpdateDeviceRequest{
 		Name: &newName,
 	})
 	if err != nil {
@@ -51,7 +70,7 @@ func TestDeviceService_Lifecycle(t *testing.T) {
 	}
 
 	// Send Command
-	cmd, err := svc.SendCommand(created.ID, models.SendCommandRequest{Payload: "reboot"})
+	cmd, err := svc.SendCommand(userID, created.ID, models.SendCommandRequest{Payload: "lock_screen"})
 	if err != nil {
 		t.Fatalf("expected command dispatch to succeed, got: %v", err)
 	}
@@ -70,7 +89,7 @@ func TestDeviceService_Lifecycle(t *testing.T) {
 		t.Errorf("expected telemetry recording to succeed, got: %v", err)
 	}
 
-	telem, err := svc.GetLatestTelemetry(created.ID)
+	telem, err := svc.GetLatestTelemetry(userID, created.ID)
 	if err != nil || telem == nil {
 		t.Fatalf("expected to get telemetry, got: %v", err)
 	}
@@ -79,11 +98,11 @@ func TestDeviceService_Lifecycle(t *testing.T) {
 	}
 
 	// Delete
-	if err := svc.DeleteDevice(created.ID); err != nil {
+	if err := svc.DeleteDevice(userID, created.ID); err != nil {
 		t.Errorf("expected delete to succeed, got: %v", err)
 	}
 
-	_, err = svc.GetDeviceByID(created.ID)
+	_, err = svc.GetDeviceByID(userID, created.ID)
 	if err == nil {
 		t.Errorf("expected error getting deleted device")
 	}
