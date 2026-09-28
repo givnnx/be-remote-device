@@ -112,6 +112,10 @@ func (r *postgresActionLogRepository) GetAll(filter models.ActionLogFilter) ([]*
 		logs = append(logs, &l)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
 	return logs, total, nil
 }
 
