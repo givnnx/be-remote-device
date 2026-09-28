@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"be-remote-device/internal/config"
@@ -12,31 +13,50 @@ import (
 )
 
 func InitDB(cfg *config.Config) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode,
-	)
-
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open db connection: %w", err)
+	hosts := []string{cfg.DBHost}
+	if lower := strings.ToLower(cfg.DBHost); lower != cfg.DBHost {
+		hosts = append(hosts, lower)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	var lastErr error
+	maxAttempts := 5
 
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping db: %w", err)
+	for _, host := range hosts {
+		dsn := fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
+			host, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode,
+		)
+
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			db, err := sql.Open("postgres", dsn)
+			if err == nil {
+				db.SetMaxOpenConns(25)
+				db.SetMaxIdleConns(5)
+				db.SetConnMaxLifetime(5 * time.Minute)
+
+				if pingErr := db.Ping(); pingErr == nil {
+					slog.Info("Connected to PostgreSQL database successfully", "host", host, "dbname", cfg.DBName)
+					if err := migrate(db); err != nil {
+						_ = db.Close()
+						return nil, fmt.Errorf("migration failed: %w", err)
+					}
+					return db, nil
+				} else {
+					lastErr = pingErr
+					_ = db.Close()
+				}
+			} else {
+				lastErr = err
+			}
+
+			if attempt < maxAttempts {
+				slog.Warn("Waiting for database connection...", "host", host, "attempt", attempt, "max", maxAttempts, "error", lastErr)
+				time.Sleep(2 * time.Second)
+			}
+		}
 	}
 
-	slog.Info("Connected to PostgreSQL database successfully", "host", cfg.DBHost, "dbname", cfg.DBName)
-
-	if err := migrate(db); err != nil {
-		return nil, fmt.Errorf("migration failed: %w", err)
-	}
-
-	return db, nil
+	return nil, fmt.Errorf("failed to ping db: %w", lastErr)
 }
 
 func migrate(db *sql.DB) error {
