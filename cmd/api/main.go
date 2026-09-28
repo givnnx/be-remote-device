@@ -28,16 +28,19 @@ func main() {
 	// Database Connection & Repositories
 	var actionLogRepo repository.ActionLogRepository
 	var userRepo repository.UserRepository
+	var deviceRepo repository.DeviceRepository
 
 	db, err := database.InitDB(cfg)
 	if err != nil {
 		slog.Warn("Database initialization failed. Using in-memory repositories as fallback.", "error", err)
 		actionLogRepo = repository.NewMemoryActionLogRepository()
 		userRepo = repository.NewMemoryUserRepository()
+		deviceRepo = repository.NewMemoryDeviceRepository()
 	} else {
 		defer db.Close()
 		actionLogRepo = repository.NewPostgresActionLogRepository(db)
 		userRepo = repository.NewPostgresUserRepository(db)
+		deviceRepo = repository.NewPostgresDeviceRepository(db)
 	}
 
 	// Action Log Service
@@ -47,8 +50,7 @@ func main() {
 	// Auth Service
 	authSvc := service.NewAuthService(cfg, userRepo)
 
-	// Device Service & Repositories
-	deviceRepo := repository.NewMemoryDeviceRepository()
+	// Device Service
 	deviceSvc := service.NewDeviceService(deviceRepo)
 
 	// HTTP Handlers & Router
