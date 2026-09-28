@@ -94,7 +94,7 @@ jobs:
             DOCKER_IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/be-remote-device:latest
             APP_NAME=be-remote-device
             APP_ENV=production
-            APP_PORT=${{ secrets.APP_PORT || 8080 }}
+            APP_PORT=${{ secrets.APP_PORT || 0 }}
             LOG_LEVEL=${{ secrets.LOG_LEVEL || 'info' }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             MASTER_API_KEY=${{ secrets.MASTER_API_KEY }}
@@ -110,6 +110,12 @@ jobs:
             # Pull latest image and redeploy
             docker compose pull
             docker compose up -d --force-recreate --remove-orphans
+
+            # Display allocated random host port
+            echo "========================================="
+            echo "Allocated Host Port for be-remote-device:"
+            docker port be-remote-device 8080 || docker compose port api 8080
+            echo "========================================="
 
             # Clean up dangling images
             docker image prune -f
