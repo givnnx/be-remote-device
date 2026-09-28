@@ -71,4 +71,8 @@ func loadDotEnv(filepath string) {
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		// ignore read errors in .env gracefully
+		_ = err
+	}
 }
