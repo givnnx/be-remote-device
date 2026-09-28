@@ -28,6 +28,11 @@ func InitDB(cfg *config.Config) (*sql.DB, error) {
 		)
 
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			// Auto create database if it doesn't exist yet
+			if err := ensureDatabaseExists(host, cfg); err != nil {
+				slog.Debug("Database auto-create check skipped or failed", "error", err)
+			}
+
 			db, err := sql.Open("postgres", dsn)
 			if err == nil {
 				db.SetMaxOpenConns(25)
@@ -57,6 +62,45 @@ func InitDB(cfg *config.Config) (*sql.DB, error) {
 	}
 
 	return nil, fmt.Errorf("failed to ping db: %w", lastErr)
+}
+
+func ensureDatabaseExists(host string, cfg *config.Config) error {
+	if cfg.DBName == "" || cfg.DBName == "postgres" {
+		return nil
+	}
+
+	defaultDSN := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=postgres sslmode=%s connect_timeout=5",
+		host, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBSSLMode,
+	)
+
+	adminDB, err := sql.Open("postgres", defaultDSN)
+	if err != nil {
+		return err
+	}
+	defer adminDB.Close()
+
+	if err := adminDB.Ping(); err != nil {
+		return err
+	}
+
+	var exists bool
+	checkQuery := "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)"
+	if err := adminDB.QueryRow(checkQuery, cfg.DBName).Scan(&exists); err != nil {
+		return err
+	}
+
+	if !exists {
+		slog.Info("Database does not exist yet. Auto-creating database...", "dbname", cfg.DBName)
+		safeDBName := strings.ReplaceAll(cfg.DBName, `"`, `""`)
+		createQuery := fmt.Sprintf(`CREATE DATABASE "%s"`, safeDBName)
+		if _, err := adminDB.Exec(createQuery); err != nil {
+			return fmt.Errorf("failed to auto-create database %s: %w", cfg.DBName, err)
+		}
+		slog.Info("Database auto-created successfully", "dbname", cfg.DBName)
+	}
+
+	return nil
 }
 
 func migrate(db *sql.DB) error {
